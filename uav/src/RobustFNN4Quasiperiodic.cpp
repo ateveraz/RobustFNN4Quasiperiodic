@@ -1,12 +1,12 @@
-//  created:    2011/05/01  /   2022/11/20
+//  created:    2024/12/13  /   2022/11/20
 //  filename:   RobustFNN4Quasiperiodic.cpp
 //
-//  author:     Guillaume Sanahuja / Sergio Urzua
+//  author:     Guillaume Sanahuja / Alejandro TEVERA RUIZ
 //              Copyright Heudiasyc UMR UTC/CNRS 7253
 //
-//  version:    $Id: $
+//  version:    $Id: 1$
 //
-//  purpose:    Proyecto 2022
+//  purpose:    Robust FNN for quasiperiodic disturbances
 //
 //
 /*********************************************************************/
@@ -16,7 +16,6 @@
 #include "Sliding_pos.h"
 #include "TargetJR3.h"
 #include "Sliding_force.h"
-//#include "MetaJR3.h"
 #include <TargetController.h>
 #include <Uav.h>
 #include <GridLayout.h>
@@ -176,18 +175,18 @@ RobustFNN4Quasiperiodic::RobustFNN4Quasiperiodic(TargetController *controller, T
     u_sliding->UseDefaultPlot4(graphLawTab2->At(1, 2));
     u_sliding->UseDefaultPlot5(graphLawTab2->At(1, 0));
 
-    u_sliding_pos = new Sliding_pos(setupLawTab3->At(0, 0), "u_smc_pos");
-    u_sliding_pos->UseDefaultPlot(graphLawTab3->At(0, 0));
-    u_sliding_pos->UseDefaultPlot2(graphLawTab3->At(0, 1));
-    u_sliding_pos->UseDefaultPlot3(graphLawTab3->At(0, 2));
-    u_sliding_pos->UseDefaultPlot4(graphLawTab3->At(1, 2));
+    afnnc = new AFNNC(setupLawTab3->At(0, 0), "u_smc_pos");
+    afnnc->UseDefaultPlot(graphLawTab3->At(0, 0));
+    afnnc->UseDefaultPlot2(graphLawTab3->At(0, 1));
+    afnnc->UseDefaultPlot3(graphLawTab3->At(0, 2));
+    afnnc->UseDefaultPlot4(graphLawTab3->At(1, 2));
 
-    u_sliding_pos->UseDefaultPlot8(graphLawTab3->At(1, 0));
-    u_sliding_pos->UseDefaultPlot9(graphLawTab3->At(1, 1));
+    afnnc->UseDefaultPlot8(graphLawTab3->At(1, 0));
+    afnnc->UseDefaultPlot9(graphLawTab3->At(1, 1));
 
-    u_sliding_pos->UseDefaultPlot5(positiongTab->At(0, 0));
-    u_sliding_pos->UseDefaultPlot6(positiongTab->At(0, 1));
-    u_sliding_pos->UseDefaultPlot7(positiongTab->At(0, 2));
+    afnnc->UseDefaultPlot5(positiongTab->At(0, 0));
+    afnnc->UseDefaultPlot6(positiongTab->At(0, 1));
+    afnnc->UseDefaultPlot7(positiongTab->At(0, 2));
     
     
     customOrientation=new AhrsData(this,"orientation");
@@ -288,7 +287,7 @@ RobustFNN4Quasiperiodic::RobustFNN4Quasiperiodic(TargetController *controller, T
 
     //getFrameworkManager()->AddDeviceToLog(u_sliding);
     AddDeviceToControlLawLog(u_sliding);
-    AddDeviceToControlLawLog(u_sliding_pos);
+    AddDeviceToControlLawLog(afnnc);
     AddDeviceToControlLawLog(u_sliding_force);
 
 
@@ -309,9 +308,9 @@ void RobustFNN4Quasiperiodic::ComputeCustomTorques(Euler &torques) {
         
         case 1:
             if(vrpnLost==true){
-                Thread::Err("Posrition control can't start: VRPN lost\n");
+                Thread::Err("Position control can't start: VRPN lost\n");
             } else {
-                sliding_ctrl_pos(torques);
+                run_afnnc(torques);
             }
             break;
         
@@ -423,7 +422,7 @@ void RobustFNN4Quasiperiodic::StartRobustFNN4Quasiperiodic(void) {
     if (SetTorqueMode(TorqueMode_t::Custom) && SetThrustMode(ThrustMode_t::Custom)) {
         Thread::Info("RobustFNN4Quasiperiodic: start\n");
         u_sliding->Reset();
-        u_sliding_pos->Reset();
+        afnnc->Reset();
         u_sliding_force->Reset();
     } else {
         Thread::Warn("RobustFNN4Quasiperiodic: could not start\n");
@@ -438,7 +437,7 @@ void RobustFNN4Quasiperiodic::StartRobustFNN4Quasiperiodic(void) {
             break;
         
         case 1:
-            l2->SetText("Control: Sliding pos");
+            l2->SetText("Control: Fourier NN");
             Thread::Info("Sliding pos\n");
             break;
         
@@ -676,8 +675,8 @@ void RobustFNN4Quasiperiodic::sliding_ctrl(Euler &torques){
 
 }
 
-void RobustFNN4Quasiperiodic::sliding_ctrl_pos(Euler &torques){
-    float tactual=double(GetTime())/1000000000-u_sliding_pos->t0;
+void RobustFNN4Quasiperiodic::run_afnnc(Euler &torques){
+    float tactual=double(GetTime())/1000000000-afnnc->t0;
     //printf("t: %f\n",tactual);
     Vector3Df xid, xidp, xidpp, xidppp;
 
@@ -713,17 +712,17 @@ void RobustFNN4Quasiperiodic::sliding_ctrl_pos(Euler &torques){
 
     //printf("xid: %f\t %f\t %f\n",xid.x,xid.y, xid.z);
     
-    u_sliding_pos->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularRates,currentQuaternion);
+    afnnc->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularRates,currentQuaternion);
     
-    u_sliding_pos->Update(GetTime());
+    afnnc->Update(GetTime());
     
     //Thread::Info("%f\t %f\t %f\t %f\n",u_sliding->Output(0),u_sliding->Output(1), u_sliding->Output(2), u_sliding->Output(3));
     
 
-    torques.roll = u_sliding_pos->Output(0);
-    torques.pitch = u_sliding_pos->Output(1);
-    torques.yaw = u_sliding_pos->Output(2);
-    thrust = u_sliding_pos->Output(3);
+    torques.roll = afnnc->Output(0);
+    torques.pitch = afnnc->Output(1);
+    torques.yaw = afnnc->Output(2);
+    thrust = afnnc->Output(3);
     
 
 

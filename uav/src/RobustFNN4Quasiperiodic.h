@@ -16,7 +16,7 @@
 
 #include <UavStateMachine.h>
 #include "Sliding.h"
-#include "Sliding_pos.h"
+#include "AFNNC.h"
 #include "Sliding_force.h"
 
 namespace flair {
@@ -32,7 +32,7 @@ namespace flair {
     namespace filter {
         class ControlLaw;
         class Sliding;
-        class Sliding_pos;
+        class AFNNC;
         class Sliding_force;
     }
     namespace meta {
@@ -69,14 +69,14 @@ class RobustFNN4Quasiperiodic : public flair::meta::UavStateMachine {
         void ComputeCustomTorques(flair::core::Euler &torques);
         float ComputeCustomThrust(void);
         void sliding_ctrl(flair::core::Euler &torques);
-        void sliding_ctrl_pos(flair::core::Euler &torques);
+        void run_afnnc(flair::core::Euler &torques);
         void sliding_ctrl_force(flair::core::Euler &torques);
         //const flair::core::AhrsData *GetOrientation(void) const;
         void pos_reference(flair::core::Vector3Df &xid, flair::core::Vector3Df &xidp, flair::core::Vector3Df &xidpp, flair::core::Vector3Df &xidppp, float tactual);
         void force_reference(flair::core::Vector3Df &fd, float tactual);
 
         flair::filter::Sliding *u_sliding;
-        flair::filter::Sliding_pos *u_sliding_pos;
+        flair::filter::AFNNC *afnnc;
         flair::filter::Sliding_force *u_sliding_force;
 
         flair::meta::MetaVrpnObject *targetVrpn,*uavVrpn;

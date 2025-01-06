@@ -31,6 +31,7 @@ SET(SRC_FILES
 	#src/MetaJR3.cpp
 	src/TargetJR3.cpp
 	src/TargetEthJR3.cpp
+	src/AFNNC.cpp
 )
 
 FLAIR_DEMO(${PROJECT_NAME} "${SRC_FILES}"
