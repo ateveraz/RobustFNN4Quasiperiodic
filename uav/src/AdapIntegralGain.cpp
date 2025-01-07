@@ -26,6 +26,8 @@ Eigen::Matrix3f AdapIntegralGain::UpdateIntegralGain(const Eigen::Vector3f& nu, 
     // Update the integral gain
     Eigen::Matrix3f Gamma_hat_p = gamma0 * nu * sigma.transpose() - gamma1*Gamma_hat;
     Gamma_hat = rk4_mat(Gamma_hat, Gamma_hat_p, dt);
+
+    Gamma_hat.cwiseAbs();
 }
 
 Eigen::Vector3f AdapIntegralGain::computeIntegralTerm(const Eigen::Vector3f& nu, const Eigen::Vector3f& sigma, const float dt) {
