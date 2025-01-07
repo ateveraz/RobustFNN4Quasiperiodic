@@ -18,6 +18,8 @@
 #include <ControlLaw.h>
 #include <Eigen/Dense>
 #include <Vector3D.h>
+#include "AdapIntegralGain.h"
+#include "FourierNN.h"
 
 namespace flair {
     namespace core {
@@ -44,7 +46,7 @@ namespace flair {
     *
     * \brief Class defining a AFNNC
     */
-        class AFNNC : public ControlLaw {
+        class AFNNC : public ControlLaw, public FourierNN, public AdapIntegralGain {
     
     
 public:
@@ -77,6 +79,10 @@ public:
     void UseDefaultPlot7(const flair::gui::LayoutPosition *position);
     void UseDefaultPlot8(const flair::gui::LayoutPosition *position);
     void UseDefaultPlot9(const flair::gui::LayoutPosition *position);
+    void plotFNN(const flair::gui::LayoutPosition *position);
+    void plotMonitor(const flair::gui::LayoutPosition *position);
+    void plotAdapGamma(const flair::gui::LayoutPosition *position);
+    void plotError(const flair::gui::LayoutPosition *position);
 
     
     
@@ -85,16 +91,20 @@ public:
 private:
     flair::core::Matrix *state;
     Levant_diff levant;
+    //FourierNN FNN;
+    //AdapItegralGain AdaptiveGamma;
 
     float sech(float value);
 
     flair::gui::CheckBox *levantd;
     flair::gui::DoubleSpinBox *T, *gamma, *k, *sat_r, *sat_p, *sat_y, *sat_t, *m, *g, *km, *p, *km_z;
-    flair::gui::DoubleSpinBox *gamma_roll, *gamma_pitch, *gamma_yaw, *gamma_x, *gamma_y, *gamma_z;
+    flair::gui::DoubleSpinBox *gamma_x, *gamma_y, *gamma_z;
     flair::gui::DoubleSpinBox *alpha_roll, *alpha_pitch, *alpha_yaw, *alpha_x, *alpha_y, *alpha_z;
     flair::gui::DoubleSpinBox *Kd_roll, *Kd_pitch, *Kd_yaw, *Kd_x, *Kd_y, *Kd_z;
     flair::gui::DoubleSpinBox *Kp_roll, *Kp_pitch, *Kp_yaw, *Kp_x, *Kp_y, *Kp_z;
     flair::gui::DoubleSpinBox *alpha_l,*lamb_l;
+    flair::gui::DoubleSpinBox *W0f_roll, *W0f_pitch, *W0f_yaw, *W1f, *omega_fnn, *threshold_fnn; // FNN parameters
+    flair::gui::DoubleSpinBox *gamma0_roll, *gamma0_pitch, *gamma0_yaw, *gamma1; // Adaptive Integral Gain parameters
 
     flair::gui::Label *lo, *lp;
     

@@ -31,6 +31,8 @@
 #include <Euler.h>
 #include <iostream>
 #include <Label.h>
+#include "AdapIntegralGain.h"
+#include "FourierNN.h"
 
 using std::string;
 using namespace flair::core;
@@ -40,12 +42,12 @@ using namespace flair::filter;
 namespace flair {
 namespace filter {
 
-AFNNC::AFNNC(const LayoutPosition *position, string name): ControlLaw(position->getLayout(), name, 4){ // Salidas 4
+AFNNC::AFNNC(const LayoutPosition *position, string name): ControlLaw(position->getLayout(), name, 4), FourierNN(), AdapIntegralGain(){ // Salidas 4
     first_update = true;
     // init matrix
     input = new Matrix(this, 4, 8, floatType, name);
 
-    MatrixDescriptor *desc = new MatrixDescriptor(13, 1);
+    MatrixDescriptor *desc = new MatrixDescriptor(22, 1);
     desc->SetElementName(0, 0, "u_roll");
     desc->SetElementName(1, 0, "u_pitch");
     desc->SetElementName(2, 0, "u_yaw");
@@ -59,6 +61,15 @@ AFNNC::AFNNC(const LayoutPosition *position, string name): ControlLaw(position->
     desc->SetElementName(10, 0, "Sa_roll");
     desc->SetElementName(11, 0, "Sa_pitch");
     desc->SetElementName(12, 0, "Sa_yaw");
+    desc->SetElementName(13, 0, "fnn_roll");
+    desc->SetElementName(14, 0, "fnn_pitch");
+    desc->SetElementName(15, 0, "fnn_yaw");
+    desc->SetElementName(16, 0, "gamma0_roll");
+    desc->SetElementName(17, 0, "gamma0_pitch");
+    desc->SetElementName(18, 0, "gamma0_yaw");
+    desc->SetElementName(19, 0, "monitor_roll");
+    desc->SetElementName(20, 0, "monitor_pitch");
+    desc->SetElementName(21, 0, "monitor_yaw");
     state = new Matrix(this, desc, floatType, name);
     delete desc;
 
@@ -67,6 +78,8 @@ AFNNC::AFNNC(const LayoutPosition *position, string name): ControlLaw(position->
     GroupBox *num = new GroupBox(reglages_groupbox->NewRow(), "Integral y derivada");
     GroupBox *ori = new GroupBox(reglages_groupbox->NewRow(), "Orientacion");
     GroupBox *pos = new GroupBox(reglages_groupbox->NewRow(), "Posicion");
+    GroupBox *fnn = new GroupBox(reglages_groupbox->NewRow(), "Fourier Neural Network");
+    GroupBox *adGain = new GroupBox(reglages_groupbox->NewRow(), "Adaptive Integral Gain");
     GroupBox *mot = new GroupBox(reglages_groupbox->NewRow(), "Motores");
 
     T = new DoubleSpinBox(num->NewRow(), "period, 0 for auto", " s", 0, 1, 0.01,3);
@@ -74,9 +87,6 @@ AFNNC::AFNNC(const LayoutPosition *position, string name): ControlLaw(position->
     lamb_l = new DoubleSpinBox(num->LastRowLastCol(), "lambda Levant:", 0, 500, 0.001, 3);
     levantd = new CheckBox(num->LastRowLastCol(), "Levant");
 
-    gamma_roll = new DoubleSpinBox(ori->NewRow(), "gamma_roll:", 0, 500, 0.001, 3);
-    gamma_pitch = new DoubleSpinBox(ori->LastRowLastCol(), "gamma_pitch:", 0, 500, 0.001, 3);
-    gamma_yaw = new DoubleSpinBox(ori->LastRowLastCol(), "gamma_yaw:", 0, 500, 0.001, 3);
     alpha_roll = new DoubleSpinBox(ori->NewRow(), "alpha_roll:", 0, 50000, 0.5, 3);
     alpha_pitch = new DoubleSpinBox(ori->LastRowLastCol(), "alpha_pitch:", 0, 50000, 0.5, 3);
     alpha_yaw = new DoubleSpinBox(ori->LastRowLastCol(), "alpha_yaw:", 0, 50000, 0.5, 3);
@@ -97,7 +107,21 @@ AFNNC::AFNNC(const LayoutPosition *position, string name): ControlLaw(position->
     Kp_y = new DoubleSpinBox(pos->LastRowLastCol(), "Kp_y:", 0, 50000, 0.5, 3);
     Kp_z = new DoubleSpinBox(pos->LastRowLastCol(), "Kp_z:", 0, 50000, 0.5, 3);
 
+    // FourierNN parameters
+    W0f_roll = new DoubleSpinBox(fnn->NewRow(), "W0_roll:", 0, 500, 0.001, 3);
+    W0f_pitch = new DoubleSpinBox(fnn->LastRowLastCol(), "W0_pitch:", 0, 500, 0.001, 3);
+    W0f_yaw = new DoubleSpinBox(fnn->LastRowLastCol(), "W0_yaw:", 0, 500, 0.001, 3);
+    W1f = new DoubleSpinBox(fnn->NewRow(), "W1:", 0, 500, 0.001, 3);
+    omega_fnn = new DoubleSpinBox(fnn->LastRowLastCol(), "omega:", 0, 500, 0.001, 3);
+    threshold_fnn = new DoubleSpinBox(fnn->LastRowLastCol(), "threshold:", 0, 500, 0.001, 3);
 
+    // Adaptive Integral Gain parameters
+    gamma0_roll = new DoubleSpinBox(adGain->NewRow(), "gamma0_roll:", 0, 500, 0.001, 3);
+    gamma0_pitch = new DoubleSpinBox(adGain->LastRowLastCol(), "gamma0_pitch:", 0, 500, 0.001, 3);
+    gamma0_yaw = new DoubleSpinBox(adGain->LastRowLastCol(), "gamma0_yaw:", 0, 500, 0.001, 3);
+    gamma1 = new DoubleSpinBox(adGain->NewRow(), "gamma1:", 0, 500, 0.001, 3);
+
+    // Motors parameters
     sat_r = new DoubleSpinBox(mot->NewRow(), "sat roll:", 0, 1, 0.1);
     sat_p = new DoubleSpinBox(mot->LastRowLastCol(), "sat pitch:", 0, 1, 0.1);
     sat_y = new DoubleSpinBox(mot->LastRowLastCol(), "sat yaw:", 0, 1, 0.1);
@@ -288,6 +312,33 @@ void AFNNC::UseDefaultPlot9(const LayoutPosition *position) {
 
 }
 
+void AFNNC::plotFNN(const LayoutPosition *position) {
+    DataPlot1D *fnn = new DataPlot1D(position, "fnn_tau", -1, 1);
+    fnn->AddCurve(state->Element(13), DataPlot::Red);
+    fnn->AddCurve(state->Element(14), DataPlot::Green);
+    fnn->AddCurve(state->Element(15), DataPlot::Blue);
+}
+
+void AFNNC::plotAdapGamma(const LayoutPosition *position) {
+    DataPlot1D *adapGamma = new DataPlot1D(position, "Adaptive_gamma", -1, 1);
+    adapGamma->AddCurve(state->Element(16), DataPlot::Red);
+    adapGamma->AddCurve(state->Element(17), DataPlot::Green);
+    adapGamma->AddCurve(state->Element(18), DataPlot::Blue);
+}
+
+void AFNNC::plotMonitor(const LayoutPosition *position) {
+    DataPlot1D *monitor = new DataPlot1D(position, "monitor", -1, 1);
+    monitor->AddCurve(state->Element(19), DataPlot::Red);
+    monitor->AddCurve(state->Element(20), DataPlot::Green);
+    monitor->AddCurve(state->Element(21), DataPlot::Blue);
+}
+
+void AFNNC::plotError(const LayoutPosition *position) {
+    DataPlot1D *error = new DataPlot1D(position, "sliding_surface", -1, 1);
+    error->AddCurve(state->Element(10), DataPlot::Red);
+    error->AddCurve(state->Element(11), DataPlot::Green);
+    error->AddCurve(state->Element(12), DataPlot::Blue);
+}
 
 void AFNNC::UpdateFrom(const io_data *data) {
     float tactual=double(GetTime())/1000000000-t0;
@@ -307,9 +358,6 @@ void AFNNC::UpdateFrom(const io_data *data) {
     Eigen::Vector3f alphao_v(alpha_roll->Value(), alpha_pitch->Value(), alpha_yaw->Value());
     Eigen::Matrix3f alphao = alphao_v.asDiagonal();
 
-    Eigen::Vector3f gammao_v(gamma_roll->Value(), gamma_pitch->Value(), gamma_yaw->Value());
-    Eigen::Matrix3f gammao = Eigen::Matrix3f::Zero(); //gammao_v.asDiagonal();
-
     Eigen::Vector3f Kdv(Kd_roll->Value(), Kd_pitch->Value(), Kd_yaw->Value());
     Eigen::Matrix3f Kdm = Kdv.asDiagonal();
 
@@ -323,6 +371,20 @@ void AFNNC::UpdateFrom(const io_data *data) {
         delta_t = 0;
         first_update = false;
     }
+
+    // Set FourierNN parameters
+    Eigen::Vector3f W0v(W0f_roll->Value(), W0f_pitch->Value(), W0f_yaw->Value());
+    Eigen::Matrix3f W0 = W0v.asDiagonal();
+    float W1 = W1f->Value();
+    float omegaF = omega_fnn->Value();
+    float thresholdF = threshold_fnn->Value();
+    setFourierNN(W0, W1, omegaF, thresholdF);
+
+    // Set Adaptive Integral Gain parameters
+    Eigen::Vector3f gamma0v(gamma0_roll->Value(), gamma0_pitch->Value(), gamma0_yaw->Value());
+    Eigen::Matrix3f gamma0 = gamma0v.asDiagonal();
+    float gamma1v = gamma1->Value();
+    setAdaptiveIntegralGain(gamma0, gamma1v);
 
     const Matrix* input = dynamic_cast<const Matrix*>(data);
 
@@ -450,14 +512,17 @@ void AFNNC::UpdateFrom(const io_data *data) {
     sgnori_p = signth(nuq,p->Value());
     sgnori = rk4_vec(sgnori, sgnori_p, delta_t);
 
-    Eigen::Vector3f nur = nuq + gammao*sgnori;
+    Eigen::Vector3f nur = nuq; // + gammao*sgnori;
 
-    Eigen::Vector3f tau = -Kdm*nur;
+    Eigen::Vector3f fnn = computeFourierNN(nur, tactual, delta_t);
+    Eigen::Vector3f adapGammav = computeIntegralTerm(nur, sgnori, delta_t);
+    Eigen::Matrix3f adapGamma = adapGammav.asDiagonal();
+
+    Eigen::Vector3f tau = -Kdm*nur - fnn; //- adapGamma*sgnori;
 
     flair::core::Time dt_ori = GetTime() - t0_o;
 
     //lo->SetText("Latecia ori: %.3f ms",(float)dt_ori/1000000);
-
 
     tau_roll = (float)tau(0)/km->Value();
 
@@ -471,6 +536,8 @@ void AFNNC::UpdateFrom(const io_data *data) {
     tau_pitch = -Sat(tau_pitch,sat_p->Value());
     tau_yaw = -Sat(tau_yaw,sat_y->Value());
     Tr = -Sat(Tr,sat_t->Value());
+
+    Eigen::Vector3f monitor = getMonitorValue();
 
     state->GetMutex();
     state->SetValueNoMutex(0, 0, tau_roll);
@@ -486,6 +553,16 @@ void AFNNC::UpdateFrom(const io_data *data) {
     state->SetValueNoMutex(10, 0, nuq.x());
     state->SetValueNoMutex(11, 0, nuq.y());
     state->SetValueNoMutex(12, 0, nuq.z());
+    state->SetValueNoMutex(13, 0, fnn.x());
+    state->SetValueNoMutex(14, 0, fnn.y());
+    state->SetValueNoMutex(15, 0, fnn.z());
+    state->SetValueNoMutex(16, 0, adapGammav.x());
+    state->SetValueNoMutex(17, 0, adapGammav.y());
+    state->SetValueNoMutex(18, 0, adapGammav.z());
+    state->SetValueNoMutex(19, 0, monitor.x());
+    state->SetValueNoMutex(20, 0, monitor.y());
+    state->SetValueNoMutex(21, 0, monitor.z());
+
     state->ReleaseMutex();
 
 

@@ -93,6 +93,7 @@ RobustFNN4Quasiperiodic::RobustFNN4Quasiperiodic(TargetController *controller, T
     setupLawTab3 = new Tab(tabWidget2, "Setup Sliding Pos");
     graphLawTab2 = new Tab(tabWidget2, "Graficas Sliding");
     graphLawTab3 = new Tab(tabWidget2, "Graficas Sliding Pos");
+    adaptationGraphsTab = new Tab(tabWidget2, "Adaptation");
 
 
 
@@ -157,9 +158,8 @@ RobustFNN4Quasiperiodic::RobustFNN4Quasiperiodic(TargetController *controller, T
     
     control_select=new ComboBox(groupbox->NewRow(),"select control");
     control_select->AddItem("Sliding");
-    control_select->AddItem("Sliding Pos");
-    control_select->AddItem("Sliding Force-Position");
     control_select->AddItem("Fourier Controller");
+    control_select->AddItem("Sliding Force-Position");
     
     l2 = new Label(groupbox->LastRowLastCol(), "Control selec");
     l2->SetText("Control: off");
@@ -187,6 +187,11 @@ RobustFNN4Quasiperiodic::RobustFNN4Quasiperiodic(TargetController *controller, T
     afnnc->UseDefaultPlot5(positiongTab->At(0, 0));
     afnnc->UseDefaultPlot6(positiongTab->At(0, 1));
     afnnc->UseDefaultPlot7(positiongTab->At(0, 2));
+
+    afnnc->plotFNN(adaptationGraphsTab->At(0, 0));
+    afnnc->plotMonitor(adaptationGraphsTab->At(0, 1));
+    afnnc->plotAdapGamma(adaptationGraphsTab->At(1, 0));
+    afnnc->plotError(adaptationGraphsTab->At(1, 1));
     
     
     customOrientation=new AhrsData(this,"orientation");
@@ -330,6 +335,7 @@ float RobustFNN4Quasiperiodic::ComputeCustomThrust(void) {
 }
 
 void RobustFNN4Quasiperiodic::ExtraSecurityCheck(void) {
+    // ToDo: Add security check.
     if ((!vrpnLost) && ((behaviourMode==BehaviourMode_t::control))) {
         // if (!targetVrpn->IsTracked(500)) {
         //     Thread::Err("VRPN, target lost\n");
@@ -438,7 +444,7 @@ void RobustFNN4Quasiperiodic::StartRobustFNN4Quasiperiodic(void) {
         
         case 1:
             l2->SetText("Control: Fourier NN");
-            Thread::Info("Sliding pos\n");
+            Thread::Info("AFNNC\n");
             break;
         
         case 2:
