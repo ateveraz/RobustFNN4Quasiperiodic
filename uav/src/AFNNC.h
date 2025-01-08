@@ -3,7 +3,7 @@
 // CECILL-C License, Version 1.0.
 // %flair:license}
 /*!
- * \file Slifing_pos.h
+ * \file AFNNC.h
  * \brief Class defining a Sliding mode controller for position
  * \author Sergio Urzua, Copyright Heudiasyc UMR UTC/CNRS 7253
  * \date 2023/05/12

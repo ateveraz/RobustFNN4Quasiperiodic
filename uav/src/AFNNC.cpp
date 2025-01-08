@@ -5,7 +5,7 @@
 //  created:    2023/01/01
 //  filename:   AFNNC.cpp
 //
-//  author:     Sergio Urzua
+//  author:     ateveraz
 //              Copyright Heudiasyc UMR UTC/CNRS 7253
 //
 //  version:    $Id: $
