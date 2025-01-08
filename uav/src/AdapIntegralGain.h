@@ -23,7 +23,7 @@ class AdapIntegralGain {
 		Eigen::Matrix3f gamma0;
 		float gamma1;
 
-		Eigen::Matrix3f UpdateIntegralGain(const Eigen::Vector3f& nu, const Eigen::Vector3f& sigma, const float dt);
+		void UpdateIntegralGain(const Eigen::Vector3f& nu, const Eigen::Vector3f& sigma, const float dt);
 };
 
 

@@ -17,7 +17,6 @@
 #include <UavStateMachine.h>
 #include "Sliding.h"
 #include "AFNNC.h"
-#include "Sliding_force.h"
 
 namespace flair {
     namespace gui {
@@ -38,27 +37,23 @@ namespace flair {
     namespace meta {
         class MetaVrpnObject;
     }
-    namespace sensor {
-        class TargetController;
-        class TargetJR3;
-    }
 }
 
 class RobustFNN4Quasiperiodic : public flair::meta::UavStateMachine {
     public:
-        RobustFNN4Quasiperiodic(flair::sensor::TargetController *controller, flair::sensor::TargetJR3 *sensor);
+        RobustFNN4Quasiperiodic(flair::sensor::TargetController *controller);
         ~RobustFNN4Quasiperiodic();
 
     private:
 
 	enum class BehaviourMode_t {
             Default,
-            control
+            control,
+            position_control
         }clTabCtrl;
 
         BehaviourMode_t behaviourMode;
         bool vrpnLost;
-        flair::sensor::TargetJR3 *jr3;
 
         void ExtraCheckPushButton(void);
         void ExtraCheckJoystick(void);
@@ -70,14 +65,11 @@ class RobustFNN4Quasiperiodic : public flair::meta::UavStateMachine {
         float ComputeCustomThrust(void);
         void sliding_ctrl(flair::core::Euler &torques);
         void run_afnnc(flair::core::Euler &torques);
-        void sliding_ctrl_force(flair::core::Euler &torques);
         //const flair::core::AhrsData *GetOrientation(void) const;
         void pos_reference(flair::core::Vector3Df &xid, flair::core::Vector3Df &xidp, flair::core::Vector3Df &xidpp, flair::core::Vector3Df &xidppp, float tactual);
-        void force_reference(flair::core::Vector3Df &fd, float tactual);
 
         flair::filter::Sliding *u_sliding;
         flair::filter::AFNNC *afnnc;
-        flair::filter::Sliding_force *u_sliding_force;
 
         flair::meta::MetaVrpnObject *targetVrpn,*uavVrpn;
         
