@@ -167,9 +167,12 @@ void AFNNC::Reset(void) {
     sgnpos_p << 0,0,0;
     sgnpos << 0,0,0;
 
+    // Reset the gain
+    ResetGain();
 
-//    pimpl_->i = 0;
-//    pimpl_->first_update = true;
+    // Reset the Fourier Neural Network
+    ResetWeights();
+
 }
 
 void AFNNC::SetValues(Vector3Df xie, Vector3Df xiep, Vector3Df xid, Vector3Df xidpp, Vector3Df xidppp, Vector3Df w, Quaternion q){

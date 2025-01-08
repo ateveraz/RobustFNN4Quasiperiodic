@@ -25,12 +25,7 @@ SET(SRC_FILES
 	src/main.cpp
 	src/RobustFNN4Quasiperiodic.cpp
 	src/Sliding.cpp
-	src/Sliding_pos.cpp
-	src/Sliding_force.cpp
 	src/NMethods.cpp
-	#src/MetaJR3.cpp
-	src/TargetJR3.cpp
-	src/TargetEthJR3.cpp
 	src/AFNNC.cpp
 	src/AdapIntegralGain.cpp
 	src/FourierNN.cpp
