@@ -521,7 +521,9 @@ void AFNNC::UpdateFrom(const io_data *data) {
     Eigen::Vector3f adapGammav = computeIntegralTerm(nur, sgnori, delta_t);
     Eigen::Matrix3f adapGamma = adapGammav.asDiagonal();
 
-    Eigen::Vector3f tau = -Kdm*nur - fnn - adapGamma*sgnori;
+    Eigen::Matrix3f k1_ = 0.1*Eigen::Matrix3f::Identity();
+
+    Eigen::Vector3f tau = -Kdm*nur - fnn - adapGamma*sgnori - k1_*sgnori;
 
     flair::core::Time dt_ori = GetTime() - t0_o;
 
