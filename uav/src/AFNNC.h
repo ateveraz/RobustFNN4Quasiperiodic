@@ -66,9 +66,10 @@ public:
   * \param xidppp Jerk deseado
   * \param w Velocidad angular
   * \param q Cuaternio de orientacion
+  * \param disturbance Disturbance (in attitude)
   */
     void SetValues(flair::core::Vector3Df xie, flair::core::Vector3Df xiep, flair::core::Vector3Df xid, 
-                    flair::core::Vector3Df xidpp, flair::core::Vector3Df xidppp, flair::core::Vector3Df w, flair::core::Quaternion q);
+                    flair::core::Vector3Df xidpp, flair::core::Vector3Df xidppp, flair::core::Vector3Df w, flair::core::Quaternion q, flair::core::Vector3Df disturbance);
     
     void UseDefaultPlot(const flair::gui::LayoutPosition *position);
     void UseDefaultPlot2(const flair::gui::LayoutPosition *position);

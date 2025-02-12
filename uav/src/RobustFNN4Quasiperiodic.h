@@ -68,6 +68,9 @@ class RobustFNN4Quasiperiodic : public flair::meta::UavStateMachine {
         //const flair::core::AhrsData *GetOrientation(void) const;
         void pos_reference(flair::core::Vector3Df &xid, flair::core::Vector3Df &xidp, flair::core::Vector3Df &xidpp, flair::core::Vector3Df &xidppp, float tactual);
 
+        void showInfoDisturbances(void);
+        void computeDisturbance(float tactual, flair::core::Vector3Df &d);
+
         flair::filter::Sliding *u_sliding;
         flair::filter::AFNNC *afnnc;
 
@@ -80,7 +83,7 @@ class RobustFNN4Quasiperiodic : public flair::meta::UavStateMachine {
         flair::gui::DoubleSpinBox *xd, *yd, *zd, *ax, *wx, *bx, *ay, *wy, *by, *az, *wz, *bz;
 
         flair::gui::PushButton *start_prueba1,*stop_prueba1;
-        flair::gui::ComboBox *control_select, *position_behavior, *xd_behavior, *yd_behavior, *zd_behavior;   
+        flair::gui::ComboBox *control_select, *position_behavior, *xd_behavior, *yd_behavior, *zd_behavior, *disturbance_select;   
         flair::gui::Tab *setupLawTab2, *graphLawTab2, *lawTab2, *setupLawTab3, *graphLawTab3, *positionTab, *positiongTab, *adaptationGraphsTab;
         flair::gui::TabWidget *tabWidget2, *Pos_tabWidget;
         flair::gui::GroupBox *seg;
@@ -88,6 +91,8 @@ class RobustFNN4Quasiperiodic : public flair::meta::UavStateMachine {
 
         flair::gui::ComboBox *force_behavior, *fx_behavior, *fy_behavior, *fz_behavior;
         flair::gui::DoubleSpinBox *fxd, *fyd, *fzd, *afx, *wfx, *bfx, *afy, *wfy, *bfy, *afz, *wfz, *bfz;
+        // Disturbance section. 
+        flair::gui::DoubleSpinBox *amp_disturbance, *freq_disturbance, *disturbance_x, *disturbance_y, *disturbance_z; 
         flair::gui::Label *lfx, *lfy, *lfz;
 
         flair::core::AhrsData *customReferenceOrientation,*customOrientation;

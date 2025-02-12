@@ -145,7 +145,23 @@ RobustFNN4Quasiperiodic::RobustFNN4Quasiperiodic(TargetController *controller): 
     
     start_prueba1=new PushButton(groupbox->NewRow(),"start control");
     stop_prueba1=new PushButton(groupbox->NewRow(),"stop control");
-    
+
+    // Disturbances section
+    GroupBox *disturbances_gui = new GroupBox(GetButtonsLayout()->LastRowLastCol(), "Disturbances");
+    disturbance_select = new ComboBox(disturbances_gui->NewRow(), "Select disturbance");
+    disturbance_select->AddItem("None");
+    disturbance_select->AddItem("Constant, d = a");
+    disturbance_select->AddItem("Sinusoidal, d = a*sin(w*t)");
+
+    disturbance_x = new DoubleSpinBox(disturbances_gui->LastRowLastCol(), "Disturbance x (%)", -1, 1, 0.1, 2);
+
+    amp_disturbance = new DoubleSpinBox(disturbances_gui->NewRow(), "Amplitude (a)", -2, 2, 0.1, 2);
+
+    disturbance_y = new DoubleSpinBox(disturbances_gui->LastRowLastCol(), "Disturbance y (%)", -1, 1, 0.1, 2);
+
+    freq_disturbance = new DoubleSpinBox(disturbances_gui->NewRow(), "Frecuency (w)", 0, 10, 0.1, 2);
+
+    disturbance_z = new DoubleSpinBox(disturbances_gui->LastRowLastCol(), "Disturbance z (%)", -1, 1, 0.1, 2);
     
     u_sliding = new Sliding(setupLawTab2->At(0, 0), "smc");
     u_sliding->UseDefaultPlot(graphLawTab2->At(0, 0));
@@ -320,6 +336,43 @@ void RobustFNN4Quasiperiodic::StopRobustFNN4Quasiperiodic(void) {
     SetThrustMode(ThrustMode_t::Default);
     behaviourMode=BehaviourMode_t::Default;
     EnterFailSafeMode();
+}
+
+void RobustFNN4Quasiperiodic::showInfoDisturbances(void)
+{
+    if (disturbance_select -> CurrentIndex() == 1)
+    {
+        std::cout << "Disturbance: Constant" << std::endl;
+    }
+    else if (disturbance_select -> CurrentIndex() == 2)
+    {
+        std::cout << "Disturbance: Sinusoidal" << std::endl;
+    }
+    else
+    {
+        std::cout << "Disturbance: None" << std::endl;
+    }
+}
+
+void RobustFNN4Quasiperiodic::computeDisturbance(float tactual, Vector3Df &d)
+{
+    if (disturbance_select->CurrentIndex() == 0)
+    {
+        d = Vector3Df(0,0,0);
+    }
+
+    if (disturbance_select->CurrentIndex() == 1)
+    {
+        d.x = disturbance_x->Value() * amp_disturbance->Value();
+        d.y = disturbance_y->Value() * amp_disturbance->Value();
+        d.z = disturbance_z->Value() * amp_disturbance->Value();
+    }
+    else if (disturbance_select->CurrentIndex() == 2)
+    {
+        d.x = disturbance_x->Value() * amp_disturbance->Value() * sin(freq_disturbance->Value()*tactual);
+        d.y = disturbance_y->Value() * amp_disturbance->Value() * sin(freq_disturbance->Value()*tactual);
+        d.z = disturbance_z->Value() * amp_disturbance->Value() * sin(freq_disturbance->Value()*tactual);
+    }  
 }
 
 void RobustFNN4Quasiperiodic::pos_reference(Vector3Df &xid, Vector3Df &xidp, Vector3Df &xidpp, Vector3Df &xidppp, float tactual){
@@ -508,13 +561,17 @@ void RobustFNN4Quasiperiodic::run_afnnc(Euler &torques){
 
     //printf("xid: %f\t %f\t %f\n",xid.x,xid.y, xid.z);
     
-    afnnc->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularRates,currentQuaternion);
+    // Compute disturbance if it is activated in GUI. 
+    Vector3Df d;
+    computeDisturbance(tactual, d);
+    //std::cout << "Disturbance: " << d.x << " " << d.y << " " << d.z << std::endl;
+
+    afnnc->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularRates,currentQuaternion, d);
     
     afnnc->Update(GetTime());
     
     //Thread::Info("%f\t %f\t %f\t %f\n",u_sliding->Output(0),u_sliding->Output(1), u_sliding->Output(2), u_sliding->Output(3));
     
-
     torques.roll = afnnc->Output(0);
     torques.pitch = afnnc->Output(1);
     torques.yaw = afnnc->Output(2);

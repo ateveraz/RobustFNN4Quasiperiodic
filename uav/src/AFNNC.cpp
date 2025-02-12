@@ -45,7 +45,7 @@ namespace filter {
 AFNNC::AFNNC(const LayoutPosition *position, string name): ControlLaw(position->getLayout(), name, 4), FourierNN(), AdapIntegralGain(){ // Salidas 4
     first_update = true;
     // init matrix
-    input = new Matrix(this, 4, 8, floatType, name);
+    input = new Matrix(this, 4, 9, floatType, name);
 
     MatrixDescriptor *desc = new MatrixDescriptor(22, 1);
     desc->SetElementName(0, 0, "u_roll");
@@ -175,7 +175,7 @@ void AFNNC::Reset(void) {
 
 }
 
-void AFNNC::SetValues(Vector3Df xie, Vector3Df xiep, Vector3Df xid, Vector3Df xidpp, Vector3Df xidppp, Vector3Df w, Quaternion q){
+void AFNNC::SetValues(Vector3Df xie, Vector3Df xiep, Vector3Df xid, Vector3Df xidpp, Vector3Df xidppp, Vector3Df w, Quaternion q, Vector3Df disturbance){
 
     // float xe = xie.x;
     // float ye = xie.y;
@@ -239,6 +239,9 @@ void AFNNC::SetValues(Vector3Df xie, Vector3Df xiep, Vector3Df xid, Vector3Df xi
     input->SetValue(2, 7, q.q2);
     input->SetValue(3, 7, q.q3);
 
+    input->SetValue(0, 8, disturbance.x);
+    input->SetValue(1, 8, disturbance.y);
+    input->SetValue(2, 8, disturbance.z);
 
 //   input->SetValue(0, 0, ze);
 //   input->SetValue(1, 0, wex);
@@ -410,6 +413,8 @@ void AFNNC::UpdateFrom(const io_data *data) {
 
     Eigen::Quaternionf q(input->ValueNoMutex(0, 7),input->ValueNoMutex(1, 7),input->ValueNoMutex(2, 7),input->ValueNoMutex(3, 7));
 
+    Eigen::Vector3f disturbance(input->ValueNoMutex(0, 8),input->ValueNoMutex(1, 8),input->ValueNoMutex(2, 8));
+
     input->ReleaseMutex();
 
     flair::core::Time t0_p = GetTime();
@@ -523,7 +528,7 @@ void AFNNC::UpdateFrom(const io_data *data) {
 
     Eigen::Matrix3f k1_ = 0.1*Eigen::Matrix3f::Identity();
 
-    Eigen::Vector3f tau = -Kdm*nur - fnn - adapGamma*sgnori - k1_*sgnori;
+    Eigen::Vector3f tau = -Kdm*nur - fnn - adapGamma*sgnori - k1_*sgnori + disturbance;
 
     flair::core::Time dt_ori = GetTime() - t0_o;
 
