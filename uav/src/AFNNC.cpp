@@ -3,9 +3,9 @@
 // CECILL-C License, Version 1.0.
 // %flair:license}
 //  created:    2023/01/01
-//  filename:   Sliding_pos.cpp
+//  filename:   AFNNC.cpp
 //
-//  author:     Sergio Urzua
+//  author:     ateveraz
 //              Copyright Heudiasyc UMR UTC/CNRS 7253
 //
 //  version:    $Id: $
@@ -14,7 +14,7 @@
 //
 //
 /*********************************************************************/
-#include "Sliding_pos.h"
+#include "AFNNC.h"
 #include "NMethods.h"
 #include <Matrix.h>
 #include <Vector3D.h>
@@ -31,6 +31,8 @@
 #include <Euler.h>
 #include <iostream>
 #include <Label.h>
+#include "AdapIntegralGain.h"
+#include "FourierNN.h"
 
 using std::string;
 using namespace flair::core;
@@ -40,12 +42,12 @@ using namespace flair::filter;
 namespace flair {
 namespace filter {
 
-Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLaw(position->getLayout(), name, 4){ // Salidas 4
+AFNNC::AFNNC(const LayoutPosition *position, string name): ControlLaw(position->getLayout(), name, 4), FourierNN(), AdapIntegralGain(){ // Salidas 4
     first_update = true;
     // init matrix
-    input = new Matrix(this, 4, 8, floatType, name);
+    input = new Matrix(this, 4, 9, floatType, name);
 
-    MatrixDescriptor *desc = new MatrixDescriptor(13, 1);
+    MatrixDescriptor *desc = new MatrixDescriptor(22, 1);
     desc->SetElementName(0, 0, "u_roll");
     desc->SetElementName(1, 0, "u_pitch");
     desc->SetElementName(2, 0, "u_yaw");
@@ -59,6 +61,15 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
     desc->SetElementName(10, 0, "Sa_roll");
     desc->SetElementName(11, 0, "Sa_pitch");
     desc->SetElementName(12, 0, "Sa_yaw");
+    desc->SetElementName(13, 0, "fnn_roll");
+    desc->SetElementName(14, 0, "fnn_pitch");
+    desc->SetElementName(15, 0, "fnn_yaw");
+    desc->SetElementName(16, 0, "gamma0_roll");
+    desc->SetElementName(17, 0, "gamma0_pitch");
+    desc->SetElementName(18, 0, "gamma0_yaw");
+    desc->SetElementName(19, 0, "monitor_roll");
+    desc->SetElementName(20, 0, "monitor_pitch");
+    desc->SetElementName(21, 0, "monitor_yaw");
     state = new Matrix(this, desc, floatType, name);
     delete desc;
 
@@ -67,6 +78,8 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
     GroupBox *num = new GroupBox(reglages_groupbox->NewRow(), "Integral y derivada");
     GroupBox *ori = new GroupBox(reglages_groupbox->NewRow(), "Orientacion");
     GroupBox *pos = new GroupBox(reglages_groupbox->NewRow(), "Posicion");
+    GroupBox *fnn = new GroupBox(reglages_groupbox->NewRow(), "Fourier Neural Network");
+    GroupBox *adGain = new GroupBox(reglages_groupbox->NewRow(), "Adaptive Integral Gain");
     GroupBox *mot = new GroupBox(reglages_groupbox->NewRow(), "Motores");
 
     T = new DoubleSpinBox(num->NewRow(), "period, 0 for auto", " s", 0, 1, 0.01,3);
@@ -74,9 +87,6 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
     lamb_l = new DoubleSpinBox(num->LastRowLastCol(), "lambda Levant:", 0, 500, 0.001, 3);
     levantd = new CheckBox(num->LastRowLastCol(), "Levant");
 
-    gamma_roll = new DoubleSpinBox(ori->NewRow(), "gamma_roll:", 0, 500, 0.001, 3);
-    gamma_pitch = new DoubleSpinBox(ori->LastRowLastCol(), "gamma_pitch:", 0, 500, 0.001, 3);
-    gamma_yaw = new DoubleSpinBox(ori->LastRowLastCol(), "gamma_yaw:", 0, 500, 0.001, 3);
     alpha_roll = new DoubleSpinBox(ori->NewRow(), "alpha_roll:", 0, 50000, 0.5, 3);
     alpha_pitch = new DoubleSpinBox(ori->LastRowLastCol(), "alpha_pitch:", 0, 50000, 0.5, 3);
     alpha_yaw = new DoubleSpinBox(ori->LastRowLastCol(), "alpha_yaw:", 0, 50000, 0.5, 3);
@@ -96,20 +106,34 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
     Kp_x = new DoubleSpinBox(pos->NewRow(), "Kp_x:", 0, 50000, 0.5, 3);
     Kp_y = new DoubleSpinBox(pos->LastRowLastCol(), "Kp_y:", 0, 50000, 0.5, 3);
     Kp_z = new DoubleSpinBox(pos->LastRowLastCol(), "Kp_z:", 0, 50000, 0.5, 3);
-    
 
+    // FourierNN parameters
+    W0f_roll = new DoubleSpinBox(fnn->NewRow(), "W0_roll:", 0, 500, 0.001, 3);
+    W0f_pitch = new DoubleSpinBox(fnn->LastRowLastCol(), "W0_pitch:", 0, 500, 0.001, 3);
+    W0f_yaw = new DoubleSpinBox(fnn->LastRowLastCol(), "W0_yaw:", 0, 500, 0.001, 3);
+    W1f = new DoubleSpinBox(fnn->NewRow(), "W1:", 0, 500, 0.001, 3);
+    omega_fnn = new DoubleSpinBox(fnn->LastRowLastCol(), "omega:", 0, 500, 0.001, 3);
+    threshold_fnn = new DoubleSpinBox(fnn->LastRowLastCol(), "threshold:", 0, 500, 0.001, 3);
+
+    // Adaptive Integral Gain parameters
+    gamma0_roll = new DoubleSpinBox(adGain->NewRow(), "gamma0_roll:", 0, 500, 0.001, 3);
+    gamma0_pitch = new DoubleSpinBox(adGain->LastRowLastCol(), "gamma0_pitch:", 0, 500, 0.001, 3);
+    gamma0_yaw = new DoubleSpinBox(adGain->LastRowLastCol(), "gamma0_yaw:", 0, 500, 0.001, 3);
+    gamma1 = new DoubleSpinBox(adGain->NewRow(), "gamma1:", 0, 500, 0.001, 3);
+
+    // Motors parameters
     sat_r = new DoubleSpinBox(mot->NewRow(), "sat roll:", 0, 1, 0.1);
     sat_p = new DoubleSpinBox(mot->LastRowLastCol(), "sat pitch:", 0, 1, 0.1);
     sat_y = new DoubleSpinBox(mot->LastRowLastCol(), "sat yaw:", 0, 1, 0.1);
     sat_t = new DoubleSpinBox(mot->LastRowLastCol(), "sat thrust:", 0, 1, 0.1);
-    
+
     km = new DoubleSpinBox(mot->NewRow(), "km:", -100, 100, 0.01, 3);
     km_z = new DoubleSpinBox(mot->LastRowLastCol(), "km_z:", -100, 100, 0.01, 3);
-    
+
     m = new DoubleSpinBox(pos->NewRow(),"m",0,2000,0.001,3);
     g = new DoubleSpinBox(pos->LastRowLastCol(),"g",-10,10,0.01,3);
     lp = new Label(pos->LastRowLastCol(), "Latencia pos");
-    
+
     t0 = double(GetTime())/1000000000;
 
     levant = Levant_diff("tanh", 8, 6, 3000);
@@ -119,13 +143,13 @@ Sliding_pos::Sliding_pos(const LayoutPosition *position, string name): ControlLa
 
     sgnori_p << 0,0,0;
     sgnori << 0,0,0;
-    
+
     AddDataToLog(state);
 }
 
-Sliding_pos::~Sliding_pos(void) {}
+AFNNC::~AFNNC(void) {}
 
-void Sliding_pos::Reset(void) {
+void AFNNC::Reset(void) {
     first_update = true;
     t0 = 0;
     t0 = double(GetTime())/1000000000;
@@ -143,12 +167,15 @@ void Sliding_pos::Reset(void) {
     sgnpos_p << 0,0,0;
     sgnpos << 0,0,0;
 
+    // Reset the gain
+    ResetGain();
 
-//    pimpl_->i = 0;
-//    pimpl_->first_update = true;
+    // Reset the Fourier Neural Network
+    ResetWeights();
+
 }
 
-void Sliding_pos::SetValues(Vector3Df xie, Vector3Df xiep, Vector3Df xid, Vector3Df xidpp, Vector3Df xidppp, Vector3Df w, Quaternion q){
+void AFNNC::SetValues(Vector3Df xie, Vector3Df xiep, Vector3Df xid, Vector3Df xidpp, Vector3Df xidppp, Vector3Df w, Quaternion q, Vector3Df disturbance){
 
     // float xe = xie.x;
     // float ye = xie.y;
@@ -212,6 +239,9 @@ void Sliding_pos::SetValues(Vector3Df xie, Vector3Df xiep, Vector3Df xid, Vector
     input->SetValue(2, 7, q.q2);
     input->SetValue(3, 7, q.q3);
 
+    input->SetValue(0, 8, disturbance.x);
+    input->SetValue(1, 8, disturbance.y);
+    input->SetValue(2, 8, disturbance.z);
 
 //   input->SetValue(0, 0, ze);
 //   input->SetValue(1, 0, wex);
@@ -230,71 +260,98 @@ void Sliding_pos::SetValues(Vector3Df xie, Vector3Df xiep, Vector3Df xid, Vector
 //   input->SetValue(3, 2, qd3);
 }
 
-void Sliding_pos::UseDefaultPlot(const LayoutPosition *position) {
+void AFNNC::UseDefaultPlot(const LayoutPosition *position) {
     DataPlot1D *rollg = new DataPlot1D(position, "u_roll", -1, 1);
     rollg->AddCurve(state->Element(0));
-    
+
 }
 
-void Sliding_pos::UseDefaultPlot2(const LayoutPosition *position) {
+void AFNNC::UseDefaultPlot2(const LayoutPosition *position) {
     DataPlot1D *pitchg = new DataPlot1D(position, "u_pitch", -1, 1);
     pitchg->AddCurve(state->Element(1));
-    
+
 }
 
-void Sliding_pos::UseDefaultPlot3(const LayoutPosition *position) {
+void AFNNC::UseDefaultPlot3(const LayoutPosition *position) {
     DataPlot1D *yawg = new DataPlot1D(position, "u_yaw", -1, 1);
     yawg->AddCurve(state->Element(2));
-    
+
 }
 
-void Sliding_pos::UseDefaultPlot4(const LayoutPosition *position) {    
+void AFNNC::UseDefaultPlot4(const LayoutPosition *position) {
     DataPlot1D *uz = new DataPlot1D(position, "u_z", -1, 1);
     uz->AddCurve(state->Element(3));
-    
+
 }
 
-void Sliding_pos::UseDefaultPlot5(const LayoutPosition *position) {    
+void AFNNC::UseDefaultPlot5(const LayoutPosition *position) {
     DataPlot1D *r = new DataPlot1D(position, "r", -3.14, 3.14);
     r->AddCurve(state->Element(4));
-    
+
 }
 
-void Sliding_pos::UseDefaultPlot6(const LayoutPosition *position) {    
+void AFNNC::UseDefaultPlot6(const LayoutPosition *position) {
     DataPlot1D *p = new DataPlot1D(position, "p", -3.14, 3.14);
     p->AddCurve(state->Element(5));
-    
+
 }
 
-void Sliding_pos::UseDefaultPlot7(const LayoutPosition *position) {    
+void AFNNC::UseDefaultPlot7(const LayoutPosition *position) {
     DataPlot1D *y = new DataPlot1D(position, "y", -3.14, 3.14);
     y->AddCurve(state->Element(6));
-    
+
 }
 
-void Sliding_pos::UseDefaultPlot8(const LayoutPosition *position) {    
+void AFNNC::UseDefaultPlot8(const LayoutPosition *position) {
     DataPlot1D *Sp = new DataPlot1D(position, "nu_rp", -5, 5);
     Sp->AddCurve(state->Element(7), DataPlot::Red);
     Sp->AddCurve(state->Element(8), DataPlot::Green);
     Sp->AddCurve(state->Element(9), DataPlot::Blue);
-    
+
 }
 
-void Sliding_pos::UseDefaultPlot9(const LayoutPosition *position) {    
+void AFNNC::UseDefaultPlot9(const LayoutPosition *position) {
     DataPlot1D *Sq = new DataPlot1D(position, "nu_r", -5, 5);
     Sq->AddCurve(state->Element(10), DataPlot::Green);
     Sq->AddCurve(state->Element(11), DataPlot::Red);
     Sq->AddCurve(state->Element(12), DataPlot::Black);
-    
+
 }
 
+void AFNNC::plotFNN(const LayoutPosition *position) {
+    DataPlot1D *fnn = new DataPlot1D(position, "fnn_tau", -1, 1);
+    fnn->AddCurve(state->Element(13), DataPlot::Red);
+    fnn->AddCurve(state->Element(14), DataPlot::Green);
+    fnn->AddCurve(state->Element(15), DataPlot::Blue);
+}
 
-void Sliding_pos::UpdateFrom(const io_data *data) {
+void AFNNC::plotAdapGamma(const LayoutPosition *position) {
+    DataPlot1D *adapGamma = new DataPlot1D(position, "Adaptive_gamma", -1, 1);
+    adapGamma->AddCurve(state->Element(16), DataPlot::Red);
+    adapGamma->AddCurve(state->Element(17), DataPlot::Green);
+    adapGamma->AddCurve(state->Element(18), DataPlot::Blue);
+}
+
+void AFNNC::plotMonitor(const LayoutPosition *position) {
+    DataPlot1D *monitor = new DataPlot1D(position, "monitor", -1, 1);
+    monitor->AddCurve(state->Element(19), DataPlot::Red);
+    monitor->AddCurve(state->Element(20), DataPlot::Green);
+    monitor->AddCurve(state->Element(21), DataPlot::Blue);
+}
+
+void AFNNC::plotError(const LayoutPosition *position) {
+    DataPlot1D *error = new DataPlot1D(position, "sliding_surface", -1, 1);
+    error->AddCurve(state->Element(10), DataPlot::Red);
+    error->AddCurve(state->Element(11), DataPlot::Green);
+    error->AddCurve(state->Element(12), DataPlot::Blue);
+}
+
+void AFNNC::UpdateFrom(const io_data *data) {
     float tactual=double(GetTime())/1000000000-t0;
     //Printf("tactual: %f\n",tactual);
     float Trs=0, tau_roll=0, tau_pitch=0, tau_yaw=0, Tr=0;
     Eigen::Vector3f ez(0,0,1);
-    
+
     Eigen::Vector3f alphap_v(alpha_x->Value(), alpha_y->Value(), alpha_z->Value());
     Eigen::Matrix3f alphap = alphap_v.asDiagonal();
 
@@ -307,9 +364,6 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Eigen::Vector3f alphao_v(alpha_roll->Value(), alpha_pitch->Value(), alpha_yaw->Value());
     Eigen::Matrix3f alphao = alphao_v.asDiagonal();
 
-    Eigen::Vector3f gammao_v(gamma_roll->Value(), gamma_pitch->Value(), gamma_yaw->Value());
-    Eigen::Matrix3f gammao = Eigen::Matrix3f::Zero(); //gammao_v.asDiagonal();
-
     Eigen::Vector3f Kdv(Kd_roll->Value(), Kd_pitch->Value(), Kd_yaw->Value());
     Eigen::Matrix3f Kdm = Kdv.asDiagonal();
 
@@ -318,14 +372,28 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     } else {
         delta_t = T->Value();
     }
-    
+
     if (first_update == true) {
         delta_t = 0;
         first_update = false;
     }
 
+    // Set FourierNN parameters
+    Eigen::Vector3f W0v(W0f_roll->Value(), W0f_pitch->Value(), W0f_yaw->Value());
+    Eigen::Matrix3f W0 = W0v.asDiagonal();
+    float W1 = W1f->Value();
+    float omegaF = omega_fnn->Value();
+    float thresholdF = threshold_fnn->Value();
+    setFourierNN(W0, W1, omegaF, thresholdF);
+
+    // Set Adaptive Integral Gain parameters
+    Eigen::Vector3f gamma0v(gamma0_roll->Value(), gamma0_pitch->Value(), gamma0_yaw->Value());
+    Eigen::Matrix3f gamma0 = gamma0v.asDiagonal();
+    float gamma1v = gamma1->Value();
+    setAdaptiveIntegralGain(gamma0, gamma1v);
+
     const Matrix* input = dynamic_cast<const Matrix*>(data);
-  
+
     if (!input) {
         Warn("casting %s to Matrix failed\n",data->ObjectName().c_str(),TIME_INFINITE);
         return;
@@ -344,7 +412,9 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Eigen::Vector3f w(input->ValueNoMutex(0, 6),input->ValueNoMutex(1, 6),input->ValueNoMutex(2, 6));
 
     Eigen::Quaternionf q(input->ValueNoMutex(0, 7),input->ValueNoMutex(1, 7),input->ValueNoMutex(2, 7),input->ValueNoMutex(3, 7));
-    
+
+    Eigen::Vector3f disturbance(input->ValueNoMutex(0, 8),input->ValueNoMutex(1, 8),input->ValueNoMutex(2, 8));
+
     input->ReleaseMutex();
 
     flair::core::Time t0_p = GetTime();
@@ -364,7 +434,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Trs = u.norm();
 
     Eigen::Vector3f Qe3 = q.toRotationMatrix()*ez;
-    
+
     Eigen::Vector3f Lambpv(powf(sech(nup(0)*1),2), powf(sech(nup(1)*1),2), powf(sech(nup(2)*1),2) );
     Eigen::Matrix3f Lambp = Lambpv.asDiagonal();
 
@@ -374,7 +444,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     // float alpha2 = Kp->Value();
     // float lamb = Kd->Value();
 
-    
+
 
     //ud = levant.Compute(f,delta_t);
 
@@ -385,11 +455,11 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
         up = levant.Compute(u,delta_t);
         //ud = levant.Compute(vec,delta_t);
     }else{
-        up = -(Kpm + m->Value()*alphap + m->Value()*gammap*Lambp) * (g->Value()*ez - (Trs/m->Value())*Qe3 - xidpp) 
+        up = -(Kpm + m->Value()*alphap + m->Value()*gammap*Lambp) * (g->Value()*ez - (Trs/m->Value())*Qe3 - xidpp)
                         -alphap*(Kpm + m->Value()*gammap*Lambp)*xiep - Kpm*gammap*sgnpos_p + m->Value()*xidppp;
     }
 
-    
+
 
     Eigen::Vector3f uh = u.normalized();
     Eigen::Vector3f uph = ((u.transpose()*u)*up - (u.transpose()*up)*u)/(powf(u.norm(),3));
@@ -412,8 +482,8 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
 
     //std::cout<<"qe: " << qe.coeffs() << std::endl;
 
-    Eigen::Vector3f wd(uph(1) - ( (uh(1)*uph(2))/(1-uh(2)) ), 
-                        -uph(0) + ( (uh(0)*uph(2))/(1-uh(2)) ), 
+    Eigen::Vector3f wd(uph(1) - ( (uh(1)*uph(2))/(1-uh(2)) ),
+                        -uph(0) + ( (uh(0)*uph(2))/(1-uh(2)) ),
                         (uh(1)*uph(0) - uh(0)*uph(1))/(1-uh(2)));
 
     //Eigen::Vector3f wd = 2*(qd.conjugate()*qdp).vec();
@@ -421,7 +491,7 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     //std::cout<<"w: " << w << std::endl;
     //std::cout<<"wd: " << wd << std::endl;
 
-    
+
 
     flair::core::Time dt_pos = GetTime() - t0_p;
 
@@ -440,38 +510,45 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     Eigen::Vector3f nu = we + alphao*QdTqe3.vec();
 
     //std::cout<<"nu: " << nu << std::endl;
-    
+
     Eigen::Vector3f nu_t0 = 0.1*Eigen::Vector3f(1,1,1);
-    
+
     Eigen::Vector3f nud = nu_t0*exp(-k->Value()*(tactual));
-    
+
     Eigen::Vector3f nuq = nu-nud;
 
     sgnori_p = signth(nuq,p->Value());
     sgnori = rk4_vec(sgnori, sgnori_p, delta_t);
 
-    Eigen::Vector3f nur = nuq + gammao*sgnori;
+    Eigen::Vector3f nur = nuq; // + gammao*sgnori;
 
-    Eigen::Vector3f tau = -Kdm*nur;
+    Eigen::Vector3f fnn = computeFourierNN(nur, tactual, delta_t);
+    Eigen::Vector3f adapGammav = computeIntegralTerm(nur, sgnori, delta_t);
+    Eigen::Matrix3f adapGamma = adapGammav.asDiagonal();
+
+    Eigen::Matrix3f k1_ = 0.1*Eigen::Matrix3f::Identity();
+
+    Eigen::Vector3f tau = -Kdm*nur - fnn - adapGamma*sgnori - k1_*sgnori + disturbance;
 
     flair::core::Time dt_ori = GetTime() - t0_o;
 
     //lo->SetText("Latecia ori: %.3f ms",(float)dt_ori/1000000);
 
-    
     tau_roll = (float)tau(0)/km->Value();
-    
+
     tau_pitch = (float)tau(1)/km->Value();
-    
+
     tau_yaw = (float)tau(2)/km->Value();
-    
+
     Tr = Trs/km_z->Value();
-    
+
     tau_roll = -Sat(tau_roll,sat_r->Value());
     tau_pitch = -Sat(tau_pitch,sat_p->Value());
     tau_yaw = -Sat(tau_yaw,sat_y->Value());
     Tr = -Sat(Tr,sat_t->Value());
-    
+
+    Eigen::Vector3f monitor = getMonitorValue();
+
     state->GetMutex();
     state->SetValueNoMutex(0, 0, tau_roll);
     state->SetValueNoMutex(1, 0, tau_pitch);
@@ -486,6 +563,16 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     state->SetValueNoMutex(10, 0, nuq.x());
     state->SetValueNoMutex(11, 0, nuq.y());
     state->SetValueNoMutex(12, 0, nuq.z());
+    state->SetValueNoMutex(13, 0, fnn.x());
+    state->SetValueNoMutex(14, 0, fnn.y());
+    state->SetValueNoMutex(15, 0, fnn.z());
+    state->SetValueNoMutex(16, 0, adapGammav.x());
+    state->SetValueNoMutex(17, 0, adapGammav.y());
+    state->SetValueNoMutex(18, 0, adapGammav.z());
+    state->SetValueNoMutex(19, 0, monitor.x());
+    state->SetValueNoMutex(20, 0, monitor.y());
+    state->SetValueNoMutex(21, 0, monitor.z());
+
     state->ReleaseMutex();
 
 
@@ -494,12 +581,12 @@ void Sliding_pos::UpdateFrom(const io_data *data) {
     output->SetValue(2, 0, tau_yaw);
     output->SetValue(3, 0, Tr);
     output->SetDataTime(data->DataTime());
-    
+
     ProcessUpdate(output);
-    
+
 }
 
-float Sliding_pos::Sat(float value, float borne) {
+float AFNNC::Sat(float value, float borne) {
     if (value < -borne)
         return -borne;
     if (value > borne)
@@ -507,7 +594,7 @@ float Sliding_pos::Sat(float value, float borne) {
     return value;
 }
 
-float Sliding_pos::sech(float value) {
+float AFNNC::sech(float value) {
     return 1 / coshf(value);
 }
 

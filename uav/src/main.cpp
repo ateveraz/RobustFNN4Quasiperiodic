@@ -17,7 +17,6 @@
 #include <stdio.h>
 #include <tclap/CmdLine.h>
 #include <TargetEthController.h>
-#include "TargetEthJR3.h"
 
 using namespace TCLAP;
 using namespace std;
@@ -29,7 +28,6 @@ string uav_type;
 string log_path;
 int port;
 int ds3port;
-int jr3port;
 string xml_file;
 string name;
 string address;
@@ -45,10 +43,9 @@ int main(int argc, char *argv[]){
 	manager->SetupUserInterface(xml_file);
 	manager->SetupLogger(log_path);
 
-	Uav *drone = CreateUav(name, uav_type);
+	Uav *drone = CreateUav(name, uav_type,"use_camv=false use_camh=false");
 	TargetEthController *controller = new TargetEthController("Dualshock3", ds3port);
-	TargetEthJR3 *sensor = new TargetEthJR3("JR3", jr3port, 80);
-	RobustFNN4Quasiperiodic *demo = new RobustFNN4Quasiperiodic(controller, sensor);
+	RobustFNN4Quasiperiodic *demo = new RobustFNN4Quasiperiodic(controller);
 
 	demo->Start();
 	demo->Join();
@@ -82,16 +79,12 @@ void parseOptions(int argc, char **argv){
 		ValueArg<int> ds3portArg("d", "ds3_port", "port pour ds3", false, 20000, "int");
 		cmd.add(ds3portArg);
 
-		ValueArg<int> jr3portArg("j", "jr3_port", "port pour jr3", false, 30000, "int");
-		cmd.add(jr3portArg);
-
 		cmd.parse(argc, argv);
 
 		// Get the value parsed by each arg.
 		log_path = logsArg.getValue();
 		port = portArg.getValue();
 		ds3port = ds3portArg.getValue();
-		jr3port = jr3portArg.getValue();
 		xml_file = xmlArg.getValue();
 		name = nameArg.getValue();
 		uav_type = typeArg.getValue();

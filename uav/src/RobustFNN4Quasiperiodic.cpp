@@ -1,22 +1,17 @@
-//  created:    2011/05/01  /   2022/11/20
+//  created:    2024/12/13  /   2022/11/20
 //  filename:   RobustFNN4Quasiperiodic.cpp
 //
-//  author:     Guillaume Sanahuja / Sergio Urzua
+//  author:     Guillaume Sanahuja / Alejandro TEVERA RUIZ
 //              Copyright Heudiasyc UMR UTC/CNRS 7253
 //
-//  version:    $Id: $
+//  version:    $Id: 1$
 //
-//  purpose:    Proyecto 2022
+//  purpose:    Robust FNN for quasiperiodic disturbances
 //
 //
 /*********************************************************************/
 
 #include "RobustFNN4Quasiperiodic.h"
-#include "Sliding.h"
-#include "Sliding_pos.h"
-#include "TargetJR3.h"
-#include "Sliding_force.h"
-//#include "MetaJR3.h"
 #include <TargetController.h>
 #include <Uav.h>
 #include <GridLayout.h>
@@ -47,19 +42,11 @@ using namespace flair::filter;
 using namespace flair::meta;
 
 
-RobustFNN4Quasiperiodic::RobustFNN4Quasiperiodic(TargetController *controller, TargetJR3 *jr3): UavStateMachine(controller), behaviourMode(BehaviourMode_t::Default), vrpnLost(false), jr3(jr3) {
+RobustFNN4Quasiperiodic::RobustFNN4Quasiperiodic(TargetController *controller): UavStateMachine(controller), behaviourMode(BehaviourMode_t::Default), vrpnLost(false) {
     Uav* uav=GetUav();
 
-    std::string ip_dir;
-    if(uav->GetType()=="x4_simu"){
-        ip_dir = uav->GetDefaultVrpnAddress();
-    } else {
-        ip_dir = "192.168.147.103:3883";
-    }
-    //ip_dir = "192.168.147.103:3883";
-    VrpnClient* vrpnclient=new VrpnClient("vrpn", ip_dir,80,uav->GetDefaultVrpnConnectionType());
-    
-    
+    VrpnClient* vrpnclient=new VrpnClient("vrpn", uav->GetDefaultVrpnAddress(),80,uav->GetDefaultVrpnConnectionType());
+
     if(vrpnclient->ConnectionType()==VrpnClient::Xbee) {
         uavVrpn = new MetaVrpnObject(uav->ObjectName(),(uint8_t)0);
         //targetVrpn=new MetaVrpnObject("target",1);
@@ -70,9 +57,6 @@ RobustFNN4Quasiperiodic::RobustFNN4Quasiperiodic(TargetController *controller, T
         uavVrpn = new MetaVrpnObject(uav->ObjectName());
         //targetVrpn=new MetaVrpnObject("target");
     }
-    
-    getFrameworkManager()->AddDeviceToLog(jr3);
-    jr3->Start();
 
     //set vrpn as failsafe altitude sensor for mamboedu as us in not working well for the moment
     if(uav->GetType()=="mamboedu") {
@@ -87,18 +71,14 @@ RobustFNN4Quasiperiodic::RobustFNN4Quasiperiodic(TargetController *controller, T
     GroupBox *groupbox = new GroupBox(GetButtonsLayout()->NewRow(), "Controles");
     
     
-    Tab *lawTab2 = new Tab(getFrameworkManager()->GetTabWidget(), "control laws custom");
+    Tab *lawTab2 = new Tab(getFrameworkManager()->GetTabWidget(), "custom control laws");
     TabWidget *tabWidget2 = new TabWidget(lawTab2->NewRow(), "laws");
     
-    setupLawTab2 = new Tab(tabWidget2, "Setup Sliding");
-    setupLawTab3 = new Tab(tabWidget2, "Setup Sliding Pos");
-    graphLawTab2 = new Tab(tabWidget2, "Graficas Sliding");
-    graphLawTab3 = new Tab(tabWidget2, "Graficas Sliding Pos");
-
-
-
-    //Tab *posTab = new Tab(getFrameworkManager()->GetTabWidget(), "position");
-    //TabWidget *Pos_tabWidget = new TabWidget(posTab->NewRow(), "position");
+    setupLawTab2 = new Tab(tabWidget2, "SMC setup");
+    setupLawTab3 = new Tab(tabWidget2, "AFNNC setup");
+    graphLawTab2 = new Tab(tabWidget2, "SMC graphs");
+    graphLawTab3 = new Tab(tabWidget2, "AFNNC graphs");
+    adaptationGraphsTab = new Tab(tabWidget2, "Adaptation graphs");
 
     positionTab = new Tab(tabWidget2, "Reference position");
     positiongTab = new Tab(tabWidget2, "Desired orientation");
@@ -154,143 +134,65 @@ RobustFNN4Quasiperiodic::RobustFNN4Quasiperiodic(TargetController *controller, T
     wz = new DoubleSpinBox(zdkbox->NewRow(), "Frecuency (w)", 0, 10, 0.1, 2);
     bz = new DoubleSpinBox(zdkbox->NewRow(), "Offset (b)", -3, 0, 0.1, 2);
 
-    
-    
+
     control_select=new ComboBox(groupbox->NewRow(),"select control");
     control_select->AddItem("Sliding");
-    control_select->AddItem("Sliding Pos");
-    control_select->AddItem("Sliding Force-Position");
     control_select->AddItem("Fourier Controller");
+    control_select->AddItem("Sliding Force-Position");
     
     l2 = new Label(groupbox->LastRowLastCol(), "Control selec");
     l2->SetText("Control: off");
     
     start_prueba1=new PushButton(groupbox->NewRow(),"start control");
     stop_prueba1=new PushButton(groupbox->NewRow(),"stop control");
+
+    // Disturbances section
+    GroupBox *disturbances_gui = new GroupBox(GetButtonsLayout()->LastRowLastCol(), "Disturbances");
+    disturbance_select = new ComboBox(disturbances_gui->NewRow(), "Select disturbance");
+    disturbance_select->AddItem("None");
+    disturbance_select->AddItem("Constant, d = a");
+    disturbance_select->AddItem("Sinusoidal, d = a*sin(w*t)");
+
+    disturbance_x = new DoubleSpinBox(disturbances_gui->LastRowLastCol(), "Disturbance x (%)", -1, 1, 0.1, 2);
+
+    amp_disturbance = new DoubleSpinBox(disturbances_gui->NewRow(), "Amplitude (a)", -2, 2, 0.1, 2);
+
+    disturbance_y = new DoubleSpinBox(disturbances_gui->LastRowLastCol(), "Disturbance y (%)", -1, 1, 0.1, 2);
+
+    freq_disturbance = new DoubleSpinBox(disturbances_gui->NewRow(), "Frecuency (w)", 0, 10, 0.1, 2);
+
+    disturbance_z = new DoubleSpinBox(disturbances_gui->LastRowLastCol(), "Disturbance z (%)", -1, 1, 0.1, 2);
     
-    
-    u_sliding = new Sliding(setupLawTab2->At(0, 0), "u_smc");
+    u_sliding = new Sliding(setupLawTab2->At(0, 0), "smc");
     u_sliding->UseDefaultPlot(graphLawTab2->At(0, 0));
     u_sliding->UseDefaultPlot2(graphLawTab2->At(0, 1));
     u_sliding->UseDefaultPlot3(graphLawTab2->At(0, 2));
     u_sliding->UseDefaultPlot4(graphLawTab2->At(1, 2));
     u_sliding->UseDefaultPlot5(graphLawTab2->At(1, 0));
 
-    u_sliding_pos = new Sliding_pos(setupLawTab3->At(0, 0), "u_smc_pos");
-    u_sliding_pos->UseDefaultPlot(graphLawTab3->At(0, 0));
-    u_sliding_pos->UseDefaultPlot2(graphLawTab3->At(0, 1));
-    u_sliding_pos->UseDefaultPlot3(graphLawTab3->At(0, 2));
-    u_sliding_pos->UseDefaultPlot4(graphLawTab3->At(1, 2));
+    afnnc = new AFNNC(setupLawTab3->At(0, 0), "afnnc");
+    afnnc->UseDefaultPlot(graphLawTab3->At(0, 0));
+    afnnc->UseDefaultPlot2(graphLawTab3->At(0, 1));
+    afnnc->UseDefaultPlot3(graphLawTab3->At(0, 2));
+    afnnc->UseDefaultPlot4(graphLawTab3->At(1, 2));
 
-    u_sliding_pos->UseDefaultPlot8(graphLawTab3->At(1, 0));
-    u_sliding_pos->UseDefaultPlot9(graphLawTab3->At(1, 1));
+    afnnc->UseDefaultPlot8(graphLawTab3->At(1, 0));
+    afnnc->UseDefaultPlot9(graphLawTab3->At(1, 1));
 
-    u_sliding_pos->UseDefaultPlot5(positiongTab->At(0, 0));
-    u_sliding_pos->UseDefaultPlot6(positiongTab->At(0, 1));
-    u_sliding_pos->UseDefaultPlot7(positiongTab->At(0, 2));
+    afnnc->UseDefaultPlot5(positiongTab->At(0, 0));
+    afnnc->UseDefaultPlot6(positiongTab->At(0, 1));
+    afnnc->UseDefaultPlot7(positiongTab->At(0, 2));
+
+    afnnc->plotFNN(adaptationGraphsTab->At(0, 0));
+    afnnc->plotMonitor(adaptationGraphsTab->At(0, 1));
+    afnnc->plotAdapGamma(adaptationGraphsTab->At(1, 0));
+    afnnc->plotError(adaptationGraphsTab->At(1, 1));
     
     
     customOrientation=new AhrsData(this,"orientation");
 
-
-    Tab *lawTab3 = new Tab(getFrameworkManager()->GetTabWidget(), "Force");
-    TabWidget *tabWidget3 = new TabWidget(lawTab3->NewRow(), "laws");
-    
-    Tab *setupForceTab = new Tab(tabWidget3, "Setup");
-    Tab *slidingTab = new Tab(tabWidget3, "Sliding");
-    Tab *errorsTab = new Tab(tabWidget3, "Graphs");
-    Tab *ctrlfTab = new Tab(tabWidget3, "Control");
-    Tab *outputTab = new Tab(tabWidget3, "Outputs");
-
-    Tab *ref = new Tab(tabWidget3, "Reference force");
-
-    GroupBox *forcebox = new GroupBox(ref->NewRow(), "Setup reference");
-    GroupBox *regboxf = new GroupBox(ref->NewRow(), "Setup regulation");
-    GroupBox *trackboxf = new GroupBox(ref->NewRow(), "Setup tracking");
-    GroupBox *trajboxf = new GroupBox(ref->NewRow(), "Setup trajectory");
-
-    force_behavior = new ComboBox(forcebox->NewRow(),"Select behavior");
-    force_behavior->AddItem("Regulation");
-    force_behavior->AddItem("Tracking");
-    force_behavior->AddItem("Trajectory");
-
-    fx_behavior = new ComboBox(trackboxf->NewRow(),"Select fxd behavior");
-    fx_behavior->AddItem("Regulation");
-    fx_behavior->AddItem("Sin");
-    fx_behavior->AddItem("Cos");
-
-    fy_behavior = new ComboBox(trackboxf->LastRowLastCol(),"Select fyd behavior");
-    fy_behavior->AddItem("Regulation");
-    fy_behavior->AddItem("Sin");
-    fy_behavior->AddItem("Cos");
-
-    fz_behavior = new ComboBox(trackboxf->LastRowLastCol(),"Select fzd behavior");
-    fz_behavior->AddItem("Regulation");
-    fz_behavior->AddItem("Sin");
-    fz_behavior->AddItem("Cos");
-
-    GroupBox *fxkbox = new GroupBox(trackboxf->NewRow(), "fxd");
-    GroupBox *fykbox = new GroupBox(trackboxf->LastRowLastCol(), "fyd");
-    GroupBox *fzkbox = new GroupBox(trackboxf->LastRowLastCol(), "fzd");
-    
-    fxd = new DoubleSpinBox(regboxf->NewRow(), "fx", " N", -10, 10, 0.1, 2);
-    fyd = new DoubleSpinBox(regboxf->LastRowLastCol(), "fy", " N", -10, 10, 0.1, 2);
-    fzd = new DoubleSpinBox(regboxf->LastRowLastCol(), "fz", " N", -10, 10, 0.1, 2);
-    
-    lfx = new Label(fxkbox->NewRow(), "funcion");
-    lfx->SetText("a*fnc(w*t) + b");
-    afx = new DoubleSpinBox(fxkbox->NewRow(), "Amplitude (a)", -2, 2, 0.1, 2);
-    wfx = new DoubleSpinBox(fxkbox->NewRow(), "Frecuency (w)", 0, 10, 0.1, 2);
-    bfx = new DoubleSpinBox(fxkbox->NewRow(), "Offset (b)", 0, 3, 0.1, 2);
-
-    lfy = new Label(fykbox->NewRow(), "funcion");
-    lfy->SetText("a*fnc(w*t) + b");
-    afy = new DoubleSpinBox(fykbox->NewRow(), "Amplitude (a)", -2, 2, 0.1, 2);
-    wfy = new DoubleSpinBox(fykbox->NewRow(), "Frecuency (w)", 0, 10, 0.1, 2);
-    bfy = new DoubleSpinBox(fykbox->NewRow(), "Offset (b)", 0, 3, 0.1, 2);
-
-    lfz = new Label(fzkbox->NewRow(), "funcion");
-    lfz->SetText("a*fnc(w*t) + b");
-    afz = new DoubleSpinBox(fzkbox->NewRow(), "Amplitude (a)", -2, 2, 0.1, 2);
-    wfz = new DoubleSpinBox(fzkbox->NewRow(), "Frecuency (w)", 0, 10, 0.1, 2);
-    bfz = new DoubleSpinBox(fzkbox->NewRow(), "Offset (b)", -3, 0, 0.1, 2);
-
-    u_sliding_force = new Sliding_force(setupForceTab->At(0, 0), "u_smc_force");
-    u_sliding_force->UseDefaultPlot(outputTab->At(0, 0));
-    u_sliding_force->UseDefaultPlot2(outputTab->At(0, 1));
-    u_sliding_force->UseDefaultPlot3(outputTab->At(0, 2));
-    u_sliding_force->UseDefaultPlot4(outputTab->At(1, 2));
-
-    u_sliding_force->UseDefaultPlot8(slidingTab->At(0, 0));
-    u_sliding_force->UseDefaultPlot9(slidingTab->At(0, 1));
-    u_sliding_force->UseDefaultPlot10(slidingTab->At(0, 2));
-    u_sliding_force->UseDefaultPlot11(slidingTab->At(1, 2));
-
-    u_sliding_force->UseDefaultPlot5(errorsTab->At(1, 0));
-    u_sliding_force->UseDefaultPlot6(errorsTab->At(1, 1));
-    u_sliding_force->UseDefaultPlot7(errorsTab->At(1, 2));
-
-    u_sliding_force->UseDefaultPlot12(errorsTab->At(0, 0));
-    u_sliding_force->UseDefaultPlot13(errorsTab->At(0, 1));
-    u_sliding_force->UseDefaultPlot14(errorsTab->At(0, 2));
-
-    u_sliding_force->UseDefaultPlot15(ctrlfTab->At(0, 0));
-    u_sliding_force->UseDefaultPlot16(ctrlfTab->At(0, 1));
-    u_sliding_force->UseDefaultPlot17(ctrlfTab->At(0, 2));
-
-    u_sliding_force->UseDefaultPlot18(ctrlfTab->At(1, 0));
-    u_sliding_force->UseDefaultPlot19(ctrlfTab->At(1, 1));
-    u_sliding_force->UseDefaultPlot20(ctrlfTab->At(1, 2));
-
-    u_sliding_force->UseDefaultPlot22(ctrlfTab->At(2, 0));
-    u_sliding_force->UseDefaultPlot21(ctrlfTab->At(2, 2));
-
-
-    //getFrameworkManager()->AddDeviceToLog(u_sliding);
     AddDeviceToControlLawLog(u_sliding);
-    AddDeviceToControlLawLog(u_sliding_pos);
-    AddDeviceToControlLawLog(u_sliding_force);
-
+    AddDeviceToControlLawLog(afnnc);
 
 }
 
@@ -309,19 +211,12 @@ void RobustFNN4Quasiperiodic::ComputeCustomTorques(Euler &torques) {
         
         case 1:
             if(vrpnLost==true){
-                Thread::Err("Posrition control can't start: VRPN lost\n");
+                Thread::Err("Fourier NN control can't start: VRPN lost\n");
             } else {
-                sliding_ctrl_pos(torques);
+                run_afnnc(torques);
             }
             break;
-        
-        case 2:
-            if(vrpnLost==true){
-                Thread::Err("Force-position control can't start: VRPN lost or JR3 disconnected\n");
-            } else {
-                sliding_ctrl_force(torques);
-            }
-            break;
+
     }
     
 }
@@ -331,42 +226,29 @@ float RobustFNN4Quasiperiodic::ComputeCustomThrust(void) {
 }
 
 void RobustFNN4Quasiperiodic::ExtraSecurityCheck(void) {
-    if ((!vrpnLost) && ((behaviourMode==BehaviourMode_t::control))) {
-        // if (!targetVrpn->IsTracked(500)) {
-        //     Thread::Err("VRPN, target lost\n");
-        //     vrpnLost=true;
-        //     EnterFailSafeMode();
-        //     Land();
-        // }
-        // if (!uavVrpn->IsTracked(500)) {
-        //     Thread::Err("VRPN, uav lost\n");
-        //     vrpnLost=true;
-        //     EnterFailSafeMode();
-        //     Land();
-        // }
+    if ((!vrpnLost) && ((behaviourMode==BehaviourMode_t::position_control))) {
+      /*
+        if (!targetVrpn->IsTracked(500)) {
+            Thread::Err("VRPN, target lost\n");
+            vrpnLost=true;
+            EnterFailSafeMode();
+            Land();
+        }
+        if (!uavVrpn->IsTracked(500)) {
+            Thread::Err("VRPN, uav lost\n");
+            vrpnLost=true;
+            EnterFailSafeMode();
+            Land();
+        }
+       */
+        if (!uavVrpn->IsTracked(500)) {
+            Thread::Err("VRPN, uav lost\n");
+            vrpnLost=true;
+            EnterFailSafeMode();
+            Land();
+        }
     }
 }
-
-// const AhrsData *RobustFNN4Quasiperiodic::GetOrientation(void) const {
-//     //get yaw from vrpn
-// 		Quaternion vrpnQuaternion;
-//     uavVrpn->GetQuaternion(vrpnQuaternion);
-
-//     //get roll, pitch and w from imu
-//     Quaternion ahrsQuaternion;
-//     Vector3Df ahrsAngularSpeed;
-//     GetDefaultOrientation()->GetQuaternionAndAngularRates(ahrsQuaternion, ahrsAngularSpeed);
-
-//     Euler ahrsEuler=ahrsQuaternion.ToEuler();
-//     ahrsEuler.yaw=vrpnQuaternion.ToEuler().yaw;
-//     Quaternion mixQuaternion=ahrsEuler.ToQuaternion();
-
-//     customOrientation->SetQuaternionAndAngularRates(mixQuaternion,ahrsAngularSpeed);
-
-//     return customOrientation;
-// }
-
-
 
 void RobustFNN4Quasiperiodic::SignalEvent(Event_t event) {
     UavStateMachine::SignalEvent(event);
@@ -395,22 +277,22 @@ void RobustFNN4Quasiperiodic::SignalEvent(Event_t event) {
 
 
 void RobustFNN4Quasiperiodic::ExtraCheckPushButton(void) {
-    if(start_prueba1->Clicked() && (behaviourMode!=BehaviourMode_t::control)) {
+    if(start_prueba1->Clicked() && (behaviourMode!=BehaviourMode_t::position_control)) {
         StartRobustFNN4Quasiperiodic();
     }
 
-    if(stop_prueba1->Clicked() && (behaviourMode==BehaviourMode_t::control)) {
+    if(stop_prueba1->Clicked() && (behaviourMode==BehaviourMode_t::position_control)) {
         StopRobustFNN4Quasiperiodic();
     }
 }
 
 void RobustFNN4Quasiperiodic::ExtraCheckJoystick(void) {
     //R1
-    if(GetTargetController()->IsButtonPressed(9) && (behaviourMode!=BehaviourMode_t::control)) {
+    if(GetTargetController()->IsButtonPressed(9) && (behaviourMode!=BehaviourMode_t::position_control)) {
         StartRobustFNN4Quasiperiodic();
     }
     //L1
-    if(GetTargetController()->IsButtonPressed(6) && (behaviourMode==BehaviourMode_t::control)) {
+    if(GetTargetController()->IsButtonPressed(6) && (behaviourMode==BehaviourMode_t::position_control)) {
         StopRobustFNN4Quasiperiodic();
     }
     
@@ -423,8 +305,7 @@ void RobustFNN4Quasiperiodic::StartRobustFNN4Quasiperiodic(void) {
     if (SetTorqueMode(TorqueMode_t::Custom) && SetThrustMode(ThrustMode_t::Custom)) {
         Thread::Info("RobustFNN4Quasiperiodic: start\n");
         u_sliding->Reset();
-        u_sliding_pos->Reset();
-        u_sliding_force->Reset();
+        afnnc->Reset();
     } else {
         Thread::Warn("RobustFNN4Quasiperiodic: could not start\n");
         l2->SetText("Control: err");
@@ -435,20 +316,15 @@ void RobustFNN4Quasiperiodic::StartRobustFNN4Quasiperiodic(void) {
         case 0:
             l2->SetText("Control: Sliding");
             Thread::Info("Sliding\n");
+            behaviourMode=BehaviourMode_t::control;
             break;
         
         case 1:
-            l2->SetText("Control: Sliding pos");
-            Thread::Info("Sliding pos\n");
-            break;
-        
-        case 2:
-            l2->SetText("Control: Sliding force-position");
-            Thread::Info("Sliding force-position\n");
+            l2->SetText("Control: Fourier NN");
+            Thread::Info("AFNNC\n");
+            behaviourMode=BehaviourMode_t::position_control;
             break;
     }
-
-    behaviourMode=BehaviourMode_t::control;
 }
 
 void RobustFNN4Quasiperiodic::StopRobustFNN4Quasiperiodic(void) {
@@ -460,6 +336,43 @@ void RobustFNN4Quasiperiodic::StopRobustFNN4Quasiperiodic(void) {
     SetThrustMode(ThrustMode_t::Default);
     behaviourMode=BehaviourMode_t::Default;
     EnterFailSafeMode();
+}
+
+void RobustFNN4Quasiperiodic::showInfoDisturbances(void)
+{
+    if (disturbance_select -> CurrentIndex() == 1)
+    {
+        std::cout << "Disturbance: Constant" << std::endl;
+    }
+    else if (disturbance_select -> CurrentIndex() == 2)
+    {
+        std::cout << "Disturbance: Sinusoidal" << std::endl;
+    }
+    else
+    {
+        std::cout << "Disturbance: None" << std::endl;
+    }
+}
+
+void RobustFNN4Quasiperiodic::computeDisturbance(float tactual, Vector3Df &d)
+{
+    if (disturbance_select->CurrentIndex() == 0)
+    {
+        d = Vector3Df(0,0,0);
+    }
+
+    if (disturbance_select->CurrentIndex() == 1)
+    {
+        d.x = disturbance_x->Value() * amp_disturbance->Value();
+        d.y = disturbance_y->Value() * amp_disturbance->Value();
+        d.z = disturbance_z->Value() * amp_disturbance->Value();
+    }
+    else if (disturbance_select->CurrentIndex() == 2)
+    {
+        d.x = disturbance_x->Value() * amp_disturbance->Value() * sin(freq_disturbance->Value()*tactual);
+        d.y = disturbance_y->Value() * amp_disturbance->Value() * sin(freq_disturbance->Value()*tactual);
+        d.z = disturbance_z->Value() * amp_disturbance->Value() * sin(freq_disturbance->Value()*tactual);
+    }  
 }
 
 void RobustFNN4Quasiperiodic::pos_reference(Vector3Df &xid, Vector3Df &xidp, Vector3Df &xidpp, Vector3Df &xidppp, float tactual){
@@ -560,71 +473,6 @@ void RobustFNN4Quasiperiodic::pos_reference(Vector3Df &xid, Vector3Df &xidp, Vec
     }
 }
 
-void RobustFNN4Quasiperiodic::force_reference(Vector3Df &fd, float tactual){
-    
-    switch(force_behavior->CurrentIndex()){
-    case 0:
-        // regulation
-        fd = Vector3Df(fxd->Value(),fyd->Value(),fzd->Value());
-        break;
-    
-    case 1:
-        // tracking
-        switch(fx_behavior->CurrentIndex()){
-        case 0:
-            // regulation
-            fd.x = fxd->Value();
-            break;
-        case 1:
-            // sin
-            fd.x = afx->Value()*sin(wfx->Value()*tactual)+bfx->Value();
-            break;
-        case 2:
-            // cos
-            fd.x = afx->Value()*cos(wfx->Value()*tactual)+bfx->Value();
-            break;
-        }
-
-        switch(fy_behavior->CurrentIndex()){
-        case 0:
-            // regulation
-            fd.y = fyd->Value();
-            break;
-        case 1:
-            // sin
-            fd.y = afy->Value()*sin(wfy->Value()*tactual)+bfy->Value();
-            break;
-        case 2:
-            // cos
-            fd.y = afy->Value()*cos(wfy->Value()*tactual)+bfy->Value();
-            break;
-        }
-
-        switch(fz_behavior->CurrentIndex()){
-        case 0:
-            // regulation
-            fd.z = fzd->Value();
-            break;
-        case 1:
-            // sin
-            fd.z = afz->Value()*sin(wfz->Value()*tactual)+bfz->Value();
-            break;
-        case 2:
-            // cos
-            fd.z = afz->Value()*cos(wfz->Value()*tactual)+bfz->Value();
-            break;
-        }
-        break;
-    
-    case 2:
-        // trajectory
-        break;
-    default:
-        fd = Vector3Df(0,0,0);
-        break;
-    }
-}
-
 
 void RobustFNN4Quasiperiodic::sliding_ctrl(Euler &torques){
     //flair::core::Time ti = GetTime();
@@ -676,8 +524,8 @@ void RobustFNN4Quasiperiodic::sliding_ctrl(Euler &torques){
 
 }
 
-void RobustFNN4Quasiperiodic::sliding_ctrl_pos(Euler &torques){
-    float tactual=double(GetTime())/1000000000-u_sliding_pos->t0;
+void RobustFNN4Quasiperiodic::run_afnnc(Euler &torques){
+    float tactual=double(GetTime())/1000000000-afnnc->t0;
     //printf("t: %f\n",tactual);
     Vector3Df xid, xidp, xidpp, xidppp;
 
@@ -713,75 +561,22 @@ void RobustFNN4Quasiperiodic::sliding_ctrl_pos(Euler &torques){
 
     //printf("xid: %f\t %f\t %f\n",xid.x,xid.y, xid.z);
     
-    u_sliding_pos->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularRates,currentQuaternion);
+    // Compute disturbance if it is activated in GUI. 
+    Vector3Df d;
+    computeDisturbance(tactual, d);
+    //std::cout << "Disturbance: " << d.x << " " << d.y << " " << d.z << std::endl;
+
+    afnnc->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularRates,currentQuaternion, d);
     
-    u_sliding_pos->Update(GetTime());
-    
-    //Thread::Info("%f\t %f\t %f\t %f\n",u_sliding->Output(0),u_sliding->Output(1), u_sliding->Output(2), u_sliding->Output(3));
-    
-
-    torques.roll = u_sliding_pos->Output(0);
-    torques.pitch = u_sliding_pos->Output(1);
-    torques.yaw = u_sliding_pos->Output(2);
-    thrust = u_sliding_pos->Output(3);
-    
-
-
-}
-
-void RobustFNN4Quasiperiodic::sliding_ctrl_force(Euler &torques){
-    float tactual=double(GetTime())/1000000000-u_sliding_force->t0;
-    //printf("t: %f\n",tactual);
-    Vector3Df xid(0,0,-1), xidp, xidpp, xidppp;
-
-    Vector3Df uav_pos,uav_vel; // in VRPN coordinate system
-    Quaternion uav_quat;
-
-    flair::core::Time ti = GetTime();
-    uavVrpn->GetPosition(uav_pos);
-    uavVrpn->GetSpeed(uav_vel);
-    uavVrpn->GetQuaternion(uav_quat);
-    flair::core::Time  tf = GetTime()-ti;
-
-    //Printf("pos: %f ms\n",  (float)tf/1000000);
-
-    //Thread::Info("Pos: %f\t %f\t %f\n",uav_pos.x,uav_pos.y, uav_pos.z);
-    //Printf("Pos: %f\t %f\t %f\n",uav_pos.x,uav_pos.y, uav_pos.z);
-    //Printf("Vel: %f\t %f\t %f\n",uav_vel.x,uav_vel.y, uav_vel.z);
-    //Thread::Info("Vel: %f\t %f\t %f\n",uav_vel.x,uav_vel.y, uav_vel.z);
-
-    ti = GetTime();
-    const AhrsData *currentOrientation = GetDefaultOrientation();
-    Quaternion currentQuaternion;
-    Vector3Df currentAngularRates;
-    currentOrientation->GetQuaternionAndAngularRates(currentQuaternion, currentAngularRates);
-    tf = GetTime()-ti;
-
-    //Printf("ori: %f ms\n",  (float)tf/1000000);
-    
-    Vector3Df currentAngularSpeed = GetCurrentAngularSpeed();
-    
-
-    //printf("xid: %f\t %f\t %f\n",xid.x,xid.y, xid.z);
-
-    Vector3Df F = jr3->GetForce();
-
-    Vector3Df Fd;
-
-    force_reference(Fd, tactual);
-
-    pos_reference(xid, xidp, xidpp, xidppp, tactual);
-    
-    u_sliding_force->SetValues(uav_pos-xid,uav_vel-xidp,xid,xidpp,xidppp,currentAngularSpeed,currentQuaternion,F,Fd);
-    
-    u_sliding_force->Update(GetTime());
+    afnnc->Update(GetTime());
     
     //Thread::Info("%f\t %f\t %f\t %f\n",u_sliding->Output(0),u_sliding->Output(1), u_sliding->Output(2), u_sliding->Output(3));
     
-    torques.roll = u_sliding_force->Output(0);
-    torques.pitch = u_sliding_force->Output(1);
-    torques.yaw = u_sliding_force->Output(2);
-    thrust = u_sliding_force->Output(3);
+    torques.roll = afnnc->Output(0);
+    torques.pitch = afnnc->Output(1);
+    torques.yaw = afnnc->Output(2);
+    thrust = afnnc->Output(3);
     
-    //thrust = ComputeDefaultThrust();
+
+
 }
