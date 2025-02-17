@@ -1,0 +1,5 @@
+Regular
+
+Th de 2.0 a 0.5 en los últimos segundos. 
+
+Tiene un balance en todos los ejes, el error no converge y comienza a entrar en resonancia, está raro. 

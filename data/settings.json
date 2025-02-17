@@ -1,0 +1,68 @@
+{
+    "logging" :
+    [
+        {
+            "t" :
+            [
+                "time (us)"
+            ],
+            "x": 
+            [
+                "Drone_0 - x",
+                "Drone_0 - y",
+                "Drone_0 - z"
+            ], 
+            "sp":
+            [
+                "afnnc - Sp_x",
+                "afnnc - Sp_y",
+                "afnnc - Sp_z"
+            ],
+            "sa": 
+            [
+                "afnnc - Sa_roll",
+                "afnnc - Sa_pitch",
+                "afnnc - Sa_yaw"
+            ],
+            "fc":
+            [
+                "afnnc - fnn_roll",
+                "afnnc - fnn_pitch",
+                "afnnc - fnn_yaw"
+            ],
+            "gamma":
+            [
+                "afnnc - gamma0_roll",
+                "afnnc - gamma0_pitch",
+                "afnnc - gamma0_yaw"
+            ],
+            "monitor":
+            [
+                "afnnc - monitor_roll",
+                "afnnc - monitor_pitch",
+                "afnnc - monitor_yaw"
+            ],
+            "u":
+            [
+                "afnnc - u_roll",
+                "afnnc - u_pitch",
+                "afnnc - u_yaw"
+            ],
+            "thrust":
+            [
+                "afnnc - u_z"
+            ]
+        }
+    ],
+    "experiments" :
+    [
+        {
+            "name" : "T1",
+            "folder_path" : "logs/20250217_1650_FlairGCS",
+            "start" : 0,
+            "end" : -1,
+            "offset" : 0.0
+        }
+    ]
+
+}

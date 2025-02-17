@@ -1,0 +1,4 @@
+[submodule "data/Flair_postprocessing"]
+	path = data/Flair_postprocessing
+	url = https://github.com/ateveraz/FLAir-postprocessing.git
+	ignore = all
